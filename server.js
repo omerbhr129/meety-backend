@@ -20,7 +20,9 @@ const adminRoutes = require('./routes/admin');
 const app = express();
 const PORT = process.env.PORT || 5004;
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
-const baseUrl = `http://localhost:${PORT}`;
+const baseUrl = process.env.NODE_ENV === 'production' 
+  ? 'https://meety-backend.vercel.app'
+  : `http://localhost:${PORT}`;
 const uploadsDir = path.join(__dirname, 'uploads');
 const profilesDir = path.join(uploadsDir, 'profiles');
 
