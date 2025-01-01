@@ -105,40 +105,6 @@ const isTimeSlotAvailable = (time, dayAvailability, duration) => {
   return isAvailable;
 };
 
-// Configure multer for file uploads
-// Configure uploads directory
-const uploadsDir = path.join(process.cwd(), 'uploads');
-const profilesDir = path.join(uploadsDir, 'profiles');
-
-// Log the paths for debugging
-console.log('Upload paths:', {
-  uploadsDir,
-  profilesDir,
-  __dirname,
-  exists: {
-    uploads: fs.existsSync(uploadsDir),
-    profiles: fs.existsSync(profilesDir)
-  }
-});
-
-// Create directories if they don't exist and set permissions
-[uploadsDir, profilesDir].forEach(dir => {
-  if (!fs.existsSync(dir)) {
-    console.log(`Creating directory: ${dir}`);
-    fs.mkdirSync(dir, { recursive: true, mode: 0o777 });
-  } else {
-    console.log(`Directory exists: ${dir}`);
-    // Update permissions
-    fs.chmodSync(dir, 0o777);
-  }
-});
-
-console.log('Upload directories:', {
-  uploadsDir,
-  profilesDir,
-  uploadsExists: fs.existsSync(uploadsDir),
-  profilesExists: fs.existsSync(profilesDir)
-});
 
 
 const sharp = require('sharp');
@@ -160,71 +126,20 @@ const upload = multer({
   }
 }).single('image');
 
-// Helper function to clean up old profile image
+// Helper function to clean up old profile image from MongoDB
 const cleanupOldProfileImage = async (userId) => {
   try {
-    const files = await fs.promises.readdir(profilesDir);
-    for (const file of files) {
-      // מחיקת כל התמונות הישנות של המשתמש (כולל webp)
-      const oldImagePattern = new RegExp(`(profile-${userId}|${userId}).*\\.(jpg|jpeg|png|gif|webp)$`, 'i');
-      if (oldImagePattern.test(file)) {
-        const filePath = path.join(profilesDir, file);
-        try {
-          await fs.promises.unlink(filePath);
-          console.log('Deleted old profile image:', filePath);
-        } catch (err) {
-          console.error('Error deleting file:', filePath, err);
-        }
-      }
+    const user = await User.findById(userId);
+    if (user && user.profileImage) {
+      user.profileImage = undefined;
+      await user.save();
+      console.log('Deleted old profile image from MongoDB for user:', userId);
     }
   } catch (error) {
-    console.error('Error cleaning up old profile images:', error);
+    console.error('Error cleaning up old profile image:', error);
   }
 };
 
-// Log static file requests
-app.use('/uploads', (req, res, next) => {
-  const filePath = path.join(__dirname, '..', 'uploads', req.url.split('?')[0]);
-  console.log('Static file request:', {
-    url: req.url,
-    path: filePath,
-    exists: fs.existsSync(filePath)
-  });
-  next();
-});
-
-// Serve static files with proper MIME types and CORS headers
-app.use('/uploads', (req, res, next) => {
-  // Remove any query parameters for file lookup
-  req.url = req.url.split('?')[0];
-  next();
-}, express.static(path.join(__dirname, '..', 'uploads'), {
-  setHeaders: (res, filePath) => {
-    // Set proper MIME type
-    if (filePath.endsWith('.jpg') || filePath.endsWith('.jpeg')) {
-      res.setHeader('Content-Type', 'image/jpeg');
-    } else if (filePath.endsWith('.png')) {
-      res.setHeader('Content-Type', 'image/png');
-    } else if (filePath.endsWith('.gif')) {
-      res.setHeader('Content-Type', 'image/gif');
-    } else if (filePath.endsWith('.webp')) {
-      res.setHeader('Content-Type', 'image/webp');
-    }
-
-    // Add CORS headers
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    
-    // Set aggressive caching headers for profile images
-    if (filePath.includes('/profiles/')) {
-      // Cache for 1 minute only
-      res.setHeader('Cache-Control', 'public, max-age=60');
-      res.setHeader('Vary', '*');
-    }
-  },
-  maxAge: '1m'
-}));
 
 // CORS configuration
 const allowedOrigins = process.env.ALLOWED_ORIGINS.split(',');
@@ -287,13 +202,6 @@ app.use(cors({
   exposedHeaders: ['Content-Type', 'Content-Length']
 }));
 
-// Enable CORS specifically for the uploads directory
-app.use('/uploads', (req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type');
-  next();
-});
 
 // Options pre-flight
 app.options('*', cors());
@@ -1486,13 +1394,6 @@ app.get('/api/user/:userId/profile-image', async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
   
-    // Delete user's profile image if exists
-    if (user.profileImage) {
-      const imagePath = path.join(__dirname, user.profileImage);
-      if (fs.existsSync(imagePath)) {
-        fs.unlinkSync(imagePath);
-      }
-    }
   
     // Delete user's meetings
     await Meeting.deleteMany({ creator: req.userId });
