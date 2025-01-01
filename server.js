@@ -20,7 +20,16 @@ const adminRoutes = require('./routes/admin');
 const app = express();
 const PORT = process.env.PORT || 5004;
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
-const baseUrl = process.env.NEXT_PUBLIC_API_URL || `http://localhost:${PORT}`;
+const baseUrl = `http://localhost:${PORT}`;
+const uploadsDir = path.join(__dirname, 'uploads');
+const profilesDir = path.join(uploadsDir, 'profiles');
+
+// Create uploads directories if they don't exist
+[uploadsDir, profilesDir].forEach(dir => {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+});
 
 // Helper functions
 const getUTCDayOfWeek = (dateStr) => {
@@ -142,10 +151,27 @@ const cleanupOldProfileImage = async (userId) => {
 
 
 // CORS configuration
-const allowedOrigins = process.env.ALLOWED_ORIGINS.split(',');
+const allowedOrigins = ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:3002', 'http://localhost:3003', 'http://localhost:3004', 'https://meetyil.com', 'https://meety-omerbhr129s-projects.vercel.app', 'https://meety-git-main-omerbhr129s-projects.vercel.app'];
+
+// הגדרות CORS
+app.use(cors({
+  origin: function(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+}));
 
 // הגדרות אבטחה
-app.use(helmet()); // אבטחה בסיסית
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" }
+})); // אבטחה בסיסית
 app.use(mongoSanitize()); // סניטציה של קלט MongoDB
 
 // XSS Protection Middleware
@@ -183,28 +209,19 @@ const registerLimiter = rateLimit({
 app.use('/auth/login', authLimiter);
 app.use('/auth/register', registerLimiter);
 
-app.use(cors({
+// Options pre-flight
+app.options('*', cors({
   origin: function(origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.indexOf(origin) === -1) {
-      console.log('Blocked origin:', origin);
-      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
-      return callback(new Error(msg), false);
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
     }
-    console.log('Allowed origin:', origin);
-    return callback(null, true);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Content-Length', 'Accept', 'Origin', 'X-Requested-With'],
-  exposedHeaders: ['Content-Type', 'Content-Length']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
-
-
-// Options pre-flight
-app.options('*', cors());
 
 // טיפול בשגיאות גלובלי
 app.use((err, req, res, next) => {

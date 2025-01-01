@@ -31,3 +31,4 @@ build/
 
 # Uploads
 uploads/
+.vercel
