@@ -20,6 +20,7 @@ const adminRoutes = require('./routes/admin');
 const app = express();
 const PORT = process.env.PORT || 5004;
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+const baseUrl = process.env.NEXT_PUBLIC_API_URL || `http://localhost:${PORT}`;
 
 // Helper functions
 const getUTCDayOfWeek = (dateStr) => {
@@ -106,7 +107,7 @@ const isTimeSlotAvailable = (time, dayAvailability, duration) => {
 
 // Configure multer for file uploads
 // Configure uploads directory
-const uploadsDir = path.join(__dirname, '..', 'uploads');
+const uploadsDir = path.join(process.cwd(), 'uploads');
 const profilesDir = path.join(uploadsDir, 'profiles');
 
 // Log the paths for debugging
@@ -1345,7 +1346,14 @@ app.get('/user', auth, async (req, res) => {
   
     if (fullName) user.fullName = fullName;
     if (email) user.email = email;
-    if (profileImage !== undefined) user.profileImage = profileImage;
+    
+    // אם נשלח אובייקט ריק, מחק את תמונת הפרופיל
+    if (Object.keys(req.body).length === 0) {
+      user.profileImage = {
+        data: null,
+        contentType: null
+      };
+    }
   
     if (currentPassword && newPassword) {
       const isValidPassword = await user.comparePassword(currentPassword);
@@ -1363,14 +1371,7 @@ app.get('/user', auth, async (req, res) => {
     await user.save();
   
     res.json({
-      user: {
-        _id: user._id,
-        email: user.email,
-        fullName: user.fullName,
-        profileImage: user.profileImage,
-        createdAt: user.createdAt,
-        updatedAt: user.updatedAt
-      }
+      user: user.toJSON()
     });
   } catch (error) {
     console.error('Error updating user:', error);
@@ -1379,6 +1380,7 @@ app.get('/user', auth, async (req, res) => {
   });
   
   // Optimized profile image upload endpoint
+// העלאת תמונת פרופיל
 app.post('/user/profile-image', auth, async (req, res) => {
   try {
     console.log('Starting profile image upload for user:', req.userId);
@@ -1411,79 +1413,38 @@ app.post('/user/profile-image', auth, async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    // Clean up old profile image for this user
-    await cleanupOldProfileImage(req.userId);
+    // עיבוד התמונה עם sharp
+    const processedImageBuffer = await sharp(req.file.buffer)
+      .rotate() // שומר על ה-orientation המקורי
+      .resize(400, 400, {
+        fit: 'cover',
+        position: 'center',
+        withoutEnlargement: true,
+        fastShrinkOnLoad: true
+      })
+      .webp({ 
+        quality: 95,
+        effort: 6,
+        force: true,
+        lossless: true
+      })
+      .toBuffer();
 
-    // Generate unique filename with timestamp and original extension
-    let fileExt = path.extname(req.file.originalname).toLowerCase() || '.jpg';
-    let filename = `profile-${req.userId}-${Date.now()}${fileExt}`;
-    let outputPath = path.join(profilesDir, filename);
+    // שמירת התמונה בבסיס הנתונים
+    user.profileImage = {
+      data: processedImageBuffer,
+      contentType: 'image/webp'
+    };
+    
+    await user.save();
+    console.log('User profile image updated in database');
 
-    console.log('Processing image:', {
-      filename,
-      outputPath,
-      exists: fs.existsSync(profilesDir)
+    res.json({ 
+      user: {
+        ...user.toJSON(),
+        profileImage: `${baseUrl}/api/user/${user._id}/profile-image?t=${Date.now()}`
+      }
     });
-
-    // Ensure profiles directory exists
-    if (!fs.existsSync(profilesDir)) {
-      await fs.promises.mkdir(profilesDir, { recursive: true });
-      console.log('Created profiles directory:', profilesDir);
-    }
-
-    try {
-      // Convert to WebP format
-      filename = filename.replace(/\.[^.]+$/, '.webp');
-      outputPath = path.join(profilesDir, filename);
-
-      // Process and save new image with optimized settings
-      await sharp(req.file.buffer)
-        .resize(400, 400, {
-          fit: 'cover',
-          position: 'center',
-          withoutEnlargement: true,
-          fastShrinkOnLoad: true
-        })
-        .webp({ 
-          quality: 95,
-          effort: 6,
-          force: true,
-          lossless: true
-        })
-        .toFile(outputPath);
-
-      console.log('Image processed and saved:', outputPath);
-
-      // Update user with new image path
-      const profileImagePath = `/uploads/profiles/${filename}`;
-      const updatedUser = await User.findById(req.userId);
-      
-      if (!updatedUser) {
-        throw new Error('User not found after image upload');
-      }
-
-      updatedUser.profileImage = profileImagePath;
-      await updatedUser.save();
-
-      console.log('User profile updated:', {
-        userId: updatedUser._id,
-        profileImage: updatedUser.profileImage
-      });
-
-      // Force immediate response with updated user
-      res.set({
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-        'Pragma': 'no-cache',
-        'Expires': '0'
-      }).json({ user: updatedUser.toJSON() });
-
-    } catch (error) {
-      // Clean up the file if there was an error
-      if (fs.existsSync(outputPath)) {
-        await fs.promises.unlink(outputPath);
-      }
-      throw error;
-    }
 
   } catch (error) {
     console.error('Error uploading profile image:', error);
@@ -1491,6 +1452,30 @@ app.post('/user/profile-image', auth, async (req, res) => {
       message: 'Error uploading profile image',
       error: error.message 
     });
+  }
+});
+
+// הצגת תמונת פרופיל
+app.get('/api/user/:userId/profile-image', async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId);
+    if (!user || !user.profileImage || !user.profileImage.data) {
+      return res.status(404).send();
+    }
+
+    // Add CORS headers
+    res.set({
+      'Content-Type': user.profileImage.contentType,
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Cross-Origin-Resource-Policy': 'cross-origin'
+    });
+    
+    res.send(user.profileImage.data);
+  } catch (error) {
+    console.error('Error serving profile image:', error);
+    res.status(500).send();
   }
 });
   

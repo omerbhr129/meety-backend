@@ -77,8 +77,8 @@ const userSchema = new mongoose.Schema({
     default: 'user'
   },
   profileImage: {
-    type: String,
-    default: null
+    data: { type: Buffer, default: null },
+    contentType: { type: String, default: null }
   },
   createdAt: {
     type: Date,
@@ -107,22 +107,20 @@ userSchema.methods.toJSON = function() {
   const obj = this.toObject();
   delete obj.password;
   
-  // Add base URL to profile image if exists
-  if (obj.profileImage) {
-    // Remove any existing base URL and query params
-    const cleanPath = obj.profileImage.split('?')[0].replace(/^https?:\/\/[^/]+/, '');
-    // Add base URL
+  // אם יש תמונת פרופיל, החזר URL לנקודת הקצה שמחזירה את התמונה
+  if (obj.profileImage?.data) {
     const baseUrl = process.env.NEXT_PUBLIC_API_URL || `http://localhost:${process.env.PORT || 5004}`;
-    obj.profileImage = `${baseUrl}${cleanPath}`;
+    obj.profileImage = `${baseUrl}/api/user/${obj._id}/profile-image?t=${Date.now()}`;
     
-    console.log('Profile image in toJSON:', {
-      originalPath: this.profileImage,
-      cleanPath,
+    console.log('Profile image URL in toJSON:', {
+      userId: obj._id,
+      url: obj.profileImage,
       baseUrl,
-      fullUrl: obj.profileImage,
       env: process.env.NODE_ENV,
       port: process.env.PORT
     });
+  } else {
+    obj.profileImage = null;
   }
   
   return obj;
