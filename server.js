@@ -1464,3 +1464,53 @@ connectWithRetry().then(() => {
     console.log(`Server is running on port ${PORT}`);
   });
 });
+
+// Update profile image URL
+app.put('/user/profile-image', auth, express.json(), async (req, res) => {
+  try {
+    const { imageUrl } = req.body;
+    
+    console.log('Updating profile image URL:', {
+      userId: req.userId,
+      imageUrl
+    });
+
+    if (!imageUrl) {
+      return res.status(400).json({ 
+        message: 'Image URL is required'
+      });
+    }
+
+    // Validate URL format
+    try {
+      new URL(imageUrl);
+    } catch (error) {
+      return res.status(400).json({ 
+        message: 'Invalid image URL format'
+      });
+    }
+
+    const user = await User.findById(req.userId);
+    if (!user) {
+      return res.status(404).json({ 
+        message: 'User not found'
+      });
+    }
+
+    user.profileImage = imageUrl;
+    await user.save();
+
+    console.log('Profile image URL updated successfully');
+
+    res.json({
+      user: user.toJSON()
+    });
+
+  } catch (error) {
+    console.error('Error updating profile image URL:', error);
+    res.status(500).json({ 
+      message: 'Error updating profile image URL',
+      error: error.message 
+    });
+  }
+});

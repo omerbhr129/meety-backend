@@ -77,8 +77,8 @@ const userSchema = new mongoose.Schema({
     default: 'user'
   },
   profileImage: {
-    data: { type: Buffer, default: null },
-    contentType: { type: String, default: null }
+    type: String,
+    default: null
   },
   createdAt: {
     type: Date,
@@ -106,23 +106,6 @@ userSchema.virtual('meetings', {
 userSchema.methods.toJSON = function() {
   const obj = this.toObject();
   delete obj.password;
-  
-  // אם יש תמונת פרופיל, החזר URL לנקודת הקצה שמחזירה את התמונה
-  if (obj.profileImage?.data) {
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || `http://localhost:${process.env.PORT || 5004}`;
-    obj.profileImage = `${baseUrl}/api/user/${obj._id}/profile-image?t=${Date.now()}`;
-    
-    console.log('Profile image URL in toJSON:', {
-      userId: obj._id,
-      url: obj.profileImage,
-      baseUrl,
-      env: process.env.NODE_ENV,
-      port: process.env.PORT
-    });
-  } else {
-    obj.profileImage = null;
-  }
-  
   return obj;
 };
 
@@ -138,28 +121,6 @@ userSchema.pre('save', async function(next) {
   if (this.isModified('password')) {
     this.password = await bcrypt.hash(this.password, 10);
   }
-
-  // Delete old profile image if it's being changed
-  if (this.isModified('profileImage') && this._original?.profileImage) {
-    const oldImagePath = path.join(__dirname, '..', '..', this._original.profileImage.split('?')[0].replace(/^\/uploads/, ''));
-    console.log('Checking old image for deletion:', {
-      oldPath: this._original.profileImage,
-      cleanPath: oldImagePath,
-      exists: fs.existsSync(oldImagePath)
-    });
-    
-    if (fs.existsSync(oldImagePath)) {
-      try {
-        fs.unlinkSync(oldImagePath);
-        console.log('Successfully deleted old profile image:', oldImagePath);
-      } catch (error) {
-        console.error('Error deleting old profile image:', error);
-      }
-    }
-  }
-  
-  // Store original values for next update
-  this._original = this.toObject();
   
   next();
 });
