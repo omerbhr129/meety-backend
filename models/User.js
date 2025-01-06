@@ -13,7 +13,7 @@ const userSchema = new mongoose.Schema({
     trim: true,
     lowercase: true,
     validate: {
-      validator: function(v) {
+      validator: function (v) {
         return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
       },
       message: props => `${props.value} is not a valid email address!`
@@ -80,6 +80,11 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: null
   },
+  googleId: {
+    type: String,
+    sparse: true,
+    unique: true
+  },
   createdAt: {
     type: Date,
     default: Date.now
@@ -103,7 +108,7 @@ userSchema.virtual('meetings', {
 });
 
 // מתודות
-userSchema.methods.toJSON = function() {
+userSchema.methods.toJSON = function () {
   const obj = this.toObject();
   delete obj.password;
   return obj;
@@ -113,24 +118,24 @@ userSchema.methods.toJSON = function() {
 const fs = require('fs');
 const path = require('path');
 
-userSchema.pre('save', async function(next) {
+userSchema.pre('save', async function (next) {
   if (this.isModified('email')) {
     this.email = this.email.toLowerCase();
   }
-  
+
   if (this.isModified('password')) {
     this.password = await bcrypt.hash(this.password, 10);
   }
-  
+
   next();
 });
 
 // מתודות עזר לנעילת חשבון
-userSchema.virtual('isLocked').get(function() {
+userSchema.virtual('isLocked').get(function () {
   return !!(this.lockUntil && this.lockUntil > Date.now());
 });
 
-userSchema.methods.incrementLoginAttempts = async function() {
+userSchema.methods.incrementLoginAttempts = async function () {
   if (this.lockUntil && this.lockUntil < Date.now()) {
     // אם נעילת החשבון פגה, אפס את הניסיונות
     await this.updateOne({
@@ -143,23 +148,23 @@ userSchema.methods.incrementLoginAttempts = async function() {
   }
 
   const updates = { $inc: { loginAttempts: 1 } };
-  
+
   if (this.loginAttempts + 1 >= MAX_LOGIN_ATTEMPTS && !this.isLocked) {
     updates.$set = { lockUntil: Date.now() + LOCK_TIME };
   }
-  
+
   await this.updateOne(updates);
 };
 
 // מתודת השוואת סיסמה משופרת
-userSchema.methods.comparePassword = async function(candidatePassword) {
+userSchema.methods.comparePassword = async function (candidatePassword) {
   try {
     if (this.isLocked) {
       throw new Error('החשבון נעול. אנא נסה שוב מאוחר יותר.');
     }
 
     const isMatch = await bcrypt.compare(candidatePassword, this.password);
-    
+
     if (!isMatch) {
       await this.incrementLoginAttempts();
       throw new Error('סיסמה שגויה');

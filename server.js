@@ -16,11 +16,13 @@ const Meeting = require('./models/Meeting');
 const Participant = require('./models/Participant');
 const auth = require('./middlewares/auth');
 const adminRoutes = require('./routes/admin');
+const { OAuth2Client } = require('google-auth-library');
+
 
 const app = express();
 const PORT = process.env.PORT || 5004;
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
-const baseUrl = process.env.NODE_ENV === 'production' 
+const baseUrl = process.env.NODE_ENV === 'production'
   ? 'https://meety-backend.vercel.app'
   : `http://localhost:${PORT}`;
 const uploadsDir = path.join(__dirname, 'uploads');
@@ -33,11 +35,12 @@ const profilesDir = path.join(uploadsDir, 'profiles');
   }
 });
 
+
 // Helper functions
 const getUTCDayOfWeek = (dateStr) => {
   const date = new Date(dateStr);
   const localDay = date.getDay();
-  
+
   console.log('Getting day of week:', {
     dateStr,
     localDay,
@@ -45,7 +48,7 @@ const getUTCDayOfWeek = (dateStr) => {
     date: date.toISOString(),
     localDate: date.toString()
   });
-  
+
   return localDay;
 };
 
@@ -64,13 +67,19 @@ const generateTimeSlots = (startTime, endTime, duration) => {
   const slots = [];
   const start = parseTime(startTime);
   const end = parseTime(endTime);
-  
+
   for (let time = start; time + duration <= end; time += duration) {
     slots.push(formatTime(time));
   }
-  
+
   return slots;
 };
+
+const client = new OAuth2Client(
+  process.env.GOOGLE_CLIENT_ID,
+  process.env.GOOGLE_CLIENT_SECRET,
+  'postmessage'
+);
 
 const isTimeSlotAvailable = (time, dayAvailability, duration) => {
   if (!dayAvailability?.enabled || !Array.isArray(dayAvailability?.timeSlots)) {
@@ -87,11 +96,11 @@ const isTimeSlotAvailable = (time, dayAvailability, duration) => {
   }
 
   const requestedTime = parseTime(time);
-  
+
   const isAvailable = dayAvailability.timeSlots.some(slot => {
     const startTime = parseTime(slot.start);
     const endTime = parseTime(slot.end);
-    
+
     const isWithinSlot = requestedTime >= startTime && (requestedTime + duration) <= endTime;
     console.log('Time slot check:', {
       requestedTime,
@@ -101,7 +110,7 @@ const isTimeSlotAvailable = (time, dayAvailability, duration) => {
       isWithinSlot,
       slot
     });
-    
+
     return isWithinSlot;
   });
 
@@ -172,7 +181,7 @@ app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
-  
+
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }
@@ -286,7 +295,7 @@ app.use((req, res, next) => {
 app.use((req, res, next) => {
   try {
     const startTime = Date.now();
-    
+
     // Log request details
     console.log('\n=== New Request ===', {
       timestamp: new Date().toISOString(),
@@ -327,7 +336,7 @@ app.get('/meetings/:idOrLink', async (req, res) => {
   try {
     const { idOrLink } = req.params;
     console.log('\nFetching meeting:', idOrLink);
-    
+
     let meeting;
     try {
       // Try to find by ID first
@@ -336,7 +345,7 @@ app.get('/meetings/:idOrLink', async (req, res) => {
       // If not found by ID, try to find by shareableLink
       meeting = await Meeting.findOne({ shareableLink: idOrLink });
     }
-    
+
     console.log('Found meeting:', meeting);
 
     if (!meeting) {
@@ -358,21 +367,21 @@ app.post('/participants', auth, express.json(), async (req, res) => {
 
     if (!name || !email || !phone) {
       console.log('Missing required fields:', { name, email, phone });
-      return res.status(400).json({ 
+      return res.status(400).json({
         message: 'Missing required fields',
         required: ['name', 'email', 'phone'],
         received: req.body
       });
     }
 
-    let participant = await Participant.findOne({ 
+    let participant = await Participant.findOne({
       $or: [
         { email, creator: req.userId },
         { email, creator: { $exists: false } }
       ]
     });
     console.log('Existing participant:', participant);
-    
+
     if (participant) {
       participant.fullName = name;
       participant.phone = phone;
@@ -383,7 +392,7 @@ app.post('/participants', auth, express.json(), async (req, res) => {
         return res.json({ participant });
       } catch (error) {
         console.error('Error updating participant:', error);
-        return res.status(400).json({ 
+        return res.status(400).json({
           message: 'Error updating participant',
           error: error.message
         });
@@ -401,26 +410,28 @@ app.post('/participants', auth, express.json(), async (req, res) => {
     try {
       await participant.save();
       console.log('Created new participant:', participant);
-      res.status(201).json({ participant: {
-        _id: participant._id.toString(),
-        fullName: participant.fullName,
-        email: participant.email,
-        phone: participant.phone,
-        meetings: participant.meetings.map(id => id.toString()),
-        lastMeeting: participant.lastMeeting,
-        createdAt: participant.createdAt,
-        updatedAt: participant.updatedAt
-      }});
+      res.status(201).json({
+        participant: {
+          _id: participant._id.toString(),
+          fullName: participant.fullName,
+          email: participant.email,
+          phone: participant.phone,
+          meetings: participant.meetings.map(id => id.toString()),
+          lastMeeting: participant.lastMeeting,
+          createdAt: participant.createdAt,
+          updatedAt: participant.updatedAt
+        }
+      });
     } catch (error) {
       console.error('Error saving participant:', error);
-      res.status(400).json({ 
+      res.status(400).json({
         message: 'Error creating participant',
         error: error.message
       });
     }
   } catch (error) {
     console.error('Error in participant creation:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       message: 'Error creating participant',
       error: error.message
     });
@@ -431,16 +442,16 @@ app.post('/participants', auth, express.json(), async (req, res) => {
 app.get('/meetings', auth, async (req, res) => {
   try {
     console.log('Fetching meetings for user:', req.userId);
-    const meetings = await Meeting.find({ 
+    const meetings = await Meeting.find({
       creator: req.userId
     })
-    .populate({
-      path: 'bookedSlots.participant',
-      select: 'fullName email phone'
-    })
-    .populate('creator', 'fullName email')
-    .lean()
-    .exec();
+      .populate({
+        path: 'bookedSlots.participant',
+        select: 'fullName email phone'
+      })
+      .populate('creator', 'fullName email')
+      .lean()
+      .exec();
 
     // Add type and duration to each booked slot
     const enhancedMeetings = meetings.map(meeting => ({
@@ -452,7 +463,7 @@ app.get('/meetings', auth, async (req, res) => {
         title: meeting.title
       }))
     }));
-    
+
     console.log('Enhanced meetings:', JSON.stringify(enhancedMeetings, null, 2));
     res.json({ meetings: enhancedMeetings });
   } catch (error) {
@@ -468,7 +479,7 @@ app.post('/meetings', auth, express.json(), async (req, res) => {
 
     if (!title || !duration || !type || !availability) {
       console.log('Missing required fields:', { title, duration, type, availability });
-      return res.status(400).json({ 
+      return res.status(400).json({
         message: 'Missing required fields',
         required: ['title', 'duration', 'type', 'availability'],
         received: req.body
@@ -490,7 +501,7 @@ app.post('/meetings', auth, express.json(), async (req, res) => {
     res.status(201).json({ meeting });
   } catch (error) {
     console.error('Error creating meeting:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       message: 'Error creating meeting',
       error: error.message,
       stack: error.stack
@@ -510,7 +521,7 @@ app.put('/meetings/:id', auth, express.json(), async (req, res) => {
     const { title, duration, type, availability } = req.body;
 
     if (!title || !duration || !type || !availability) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         message: 'Missing required fields',
         required: ['title', 'duration', 'type', 'availability'],
         received: req.body
@@ -534,7 +545,7 @@ app.put('/meetings/:id', auth, express.json(), async (req, res) => {
 
     const updatedAvailability = {};
     const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-    
+
     days.forEach(day => {
       updatedAvailability[day] = {
         enabled: availability[day]?.enabled ?? false,
@@ -549,11 +560,11 @@ app.put('/meetings/:id', auth, express.json(), async (req, res) => {
 
     await meeting.save();
     console.log('Updated meeting:', meeting);
-    
+
     res.json({ meeting });
   } catch (error) {
     console.error('Error updating meeting:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       message: 'Error updating meeting',
       error: error.message
     });
@@ -575,7 +586,7 @@ app.patch('/meetings/:meetingId/slots/:slotId', auth, async (req, res) => {
       userId: req.userId
     });
 
-    const meeting = await Meeting.findOne({ 
+    const meeting = await Meeting.findOne({
       _id: meetingId,
       creator: req.userId
     });
@@ -626,7 +637,7 @@ app.patch('/meetings/:meetingId/slots/:slotId/status', auth, async (req, res) =>
       return res.status(400).json({ error: 'Invalid status' });
     }
 
-    const meeting = await Meeting.findOne({ 
+    const meeting = await Meeting.findOne({
       _id: meetingId,
       creator: req.userId
     });
@@ -664,14 +675,14 @@ app.patch('/meetings/:meetingId/slots/:slotId/status', auth, async (req, res) =>
 app.delete('/meetings/:meetingId/slots/:slotId', auth, async (req, res) => {
   try {
     const { meetingId, slotId } = req.params;
-    
+
     console.log('Deleting meeting slot:', {
       meetingId,
       slotId,
       userId: req.userId
     });
 
-    const meeting = await Meeting.findOne({ 
+    const meeting = await Meeting.findOne({
       _id: meetingId,
       creator: req.userId
     });
@@ -705,7 +716,7 @@ app.delete('/meetings/:id', auth, async (req, res) => {
   try {
     const { id } = req.params;
     console.log('Deleting meeting:', id);
-    
+
     const meeting = await Meeting.findById(id);
 
     if (!meeting) {
@@ -732,15 +743,15 @@ app.delete('/meetings/:id', auth, async (req, res) => {
 app.get('/participants', auth, async (req, res) => {
   try {
     console.log('Fetching participants for user:', req.userId);
-    
+
     // מצא את כל הפגישות של המשתמש
-    const meetings = await Meeting.find({ 
+    const meetings = await Meeting.find({
       creator: new mongoose.Types.ObjectId(req.userId),
       status: 'active'
     });
-    
+
     const meetingIds = meetings.map(meeting => meeting._id);
-    
+
     // מצא את כל המשתתפים שנוצרו על ידי המשתמש
     const participants = await Participant.find({
       $or: [
@@ -748,9 +759,9 @@ app.get('/participants', auth, async (req, res) => {
         { creator: req.userId } // משתתפים שנוצרו על ידי המשתמש
       ]
     });
-    
+
     console.log('Found participants:', participants);
-    res.json({participants});
+    res.json({ participants });
   } catch (error) {
     console.error('Error fetching participants:', error);
     res.status(500).json({ message: 'Error fetching participants' });
@@ -776,7 +787,7 @@ app.put('/participants/:id', auth, async (req, res) => {
     await participant.save();
     console.log('Updated participant:', participant);
 
-    res.json({ 
+    res.json({
       participant: {
         _id: participant._id.toString(),
         fullName: participant.fullName,
@@ -790,7 +801,7 @@ app.put('/participants/:id', auth, async (req, res) => {
     });
   } catch (error) {
     console.error('Error updating participant:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       message: 'Error updating participant',
       error: error.message
     });
@@ -822,7 +833,7 @@ app.delete('/participants/:id', auth, async (req, res) => {
 
     const deleteResult = await participant.deleteOne();
     console.log('Delete result:', deleteResult);
-    
+
     console.log('Participant deleted successfully');
     res.json({ message: 'Participant deleted successfully' });
   } catch (error) {
@@ -837,13 +848,13 @@ app.post('/meetings/:id/book', express.json(), async (req, res) => {
     console.log('\n=== Booking Meeting Request ===');
     console.log('Request params:', req.params);
     console.log('Request body:', req.body);
-    
+
     const { id } = req.params;
     const { date, time, participant } = req.body;
 
     if (!date || !time || !participant) {
       console.log('Missing required fields:', { date, time, participant });
-      return res.status(400).json({ 
+      return res.status(400).json({
         message: 'Missing required fields',
         required: ['date', 'time', 'participant'],
         received: req.body
@@ -851,7 +862,7 @@ app.post('/meetings/:id/book', express.json(), async (req, res) => {
     }
 
     let meeting;
-    
+
     // Try to find by ID first
     try {
       meeting = await Meeting.findById(id);
@@ -890,15 +901,15 @@ app.post('/meetings/:id/book', express.json(), async (req, res) => {
       const slotEndMinutes = slotEndHour * 60 + slotEndMinute;
       const bookingMinutes = bookingHour * 60 + bookingMinute;
 
-      return bookingMinutes >= slotStartMinutes && 
-             (bookingMinutes + meeting.duration) <= slotEndMinutes;
+      return bookingMinutes >= slotStartMinutes &&
+        (bookingMinutes + meeting.duration) <= slotEndMinutes;
     });
 
     if (!isTimeAvailable) {
       return res.status(400).json({ message: 'השעה הנבחרת אינה זמינה' });
     }
 
-    const isSlotBooked = meeting.bookedSlots.some(slot => 
+    const isSlotBooked = meeting.bookedSlots.some(slot =>
       slot.date === date && slot.time === time && slot.status !== 'deleted'
     );
 
@@ -909,10 +920,10 @@ app.post('/meetings/:id/book', express.json(), async (req, res) => {
     // Check if meeting time has passed
     const meetingDateTime = new Date(`${date}T${time}`);
     const now = new Date();
-    
+
     // Format date to YYYY-MM-DD
     const formattedDate = date.split('T')[0];
-    
+
     const booking = {
       date: formattedDate,
       time,
@@ -943,7 +954,7 @@ app.post('/meetings/:id/book', express.json(), async (req, res) => {
       code: error.code,
       name: error.name
     });
-    res.status(500).json({ 
+    res.status(500).json({
       message: 'Error booking meeting',
       error: error.message,
       details: error.errors
@@ -957,13 +968,13 @@ app.post('/meetings/:id/book-single', express.json(), async (req, res) => {
     console.log('\n=== Booking Single Meeting Request ===');
     console.log('Request params:', req.params);
     console.log('Request body:', req.body);
-    
+
     const { id } = req.params;
     const { date, time, participant } = req.body;
 
     if (!date || !time || !participant) {
       console.log('Missing required fields:', { date, time, participant });
-      return res.status(400).json({ 
+      return res.status(400).json({
         message: 'Missing required fields',
         required: ['date', 'time', 'participant'],
         received: req.body
@@ -971,7 +982,7 @@ app.post('/meetings/:id/book-single', express.json(), async (req, res) => {
     }
 
     let meeting;
-    
+
     // Try to find by ID first
     try {
       meeting = await Meeting.findById(id);
@@ -1010,15 +1021,15 @@ app.post('/meetings/:id/book-single', express.json(), async (req, res) => {
       const slotEndMinutes = slotEndHour * 60 + slotEndMinute;
       const bookingMinutes = bookingHour * 60 + bookingMinute;
 
-      return bookingMinutes >= slotStartMinutes && 
-             (bookingMinutes + meeting.duration) <= slotEndMinutes;
+      return bookingMinutes >= slotStartMinutes &&
+        (bookingMinutes + meeting.duration) <= slotEndMinutes;
     });
 
     if (!isTimeAvailable) {
       return res.status(400).json({ message: 'השעה הנבחרת אינה זמינה' });
     }
 
-    const isSlotBooked = meeting.bookedSlots.some(slot => 
+    const isSlotBooked = meeting.bookedSlots.some(slot =>
       slot.date === date && slot.time === time
     );
 
@@ -1029,7 +1040,7 @@ app.post('/meetings/:id/book-single', express.json(), async (req, res) => {
     // Check if meeting time has passed
     const meetingDateTime = new Date(`${date}T${time}`);
     const now = new Date();
-    
+
     const booking = {
       date,
       time,
@@ -1060,7 +1071,7 @@ app.post('/meetings/:id/book-single', express.json(), async (req, res) => {
       code: error.code,
       name: error.name
     });
-    res.status(500).json({ 
+    res.status(500).json({
       message: 'Error booking meeting',
       error: error.message,
       details: error.errors
@@ -1118,13 +1129,13 @@ app.post('/auth/register', express.json(), async (req, res) => {
     console.error('Registration error:', error);
     res.status(500).json({ message: 'שגיאה בהרשמה למערכת. אנא נסה שנית.' });
   }
-  });
-  
-  app.post('/auth/login', express.json(), async (req, res) => {
+});
+
+app.post('/auth/login', express.json(), async (req, res) => {
   try {
     const { email, password } = req.body;
     console.log('Login attempt:', { email });
-  
+
     const user = await User.findOne({ email });
     if (!user) {
       console.log('User not found:', email);
@@ -1136,13 +1147,13 @@ app.post('/auth/register', express.json(), async (req, res) => {
       console.log('Invalid password for user:', email);
       return res.status(401).json({ message: 'סיסמה שגויה. אנא נסה שנית.' });
     }
-  
+
     const token = jwt.sign(
       { userId: user._id, email: user.email },
       JWT_SECRET,
       { expiresIn: '7d' }
     );
-  
+
     res.json({
       token,
       user: {
@@ -1158,10 +1169,66 @@ app.post('/auth/register', express.json(), async (req, res) => {
     console.error('Login error:', error);
     res.status(500).json({ message: 'שגיאה בהתחברות למערכת. אנא נסה שנית.' });
   }
-  });
-  
-  // User routes
-  // Admin routes
+});
+
+app.post('/auth/google', express.json(), async (req, res) => {
+  try {
+    const { token } = req.body;
+    console.log('Google login attempt:', { token });
+    // Verify Google token
+    const ticket = await client.verifyIdToken({
+      idToken: token,
+      audience: process.env.GOOGLE_CLIENT_ID
+    });
+
+    const { email, name, picture } = ticket.getPayload();
+
+    // Check if user exists
+    let user = await User.findOne({ email });
+
+    if (!user) {
+      // Create new user if doesn't exist
+      user = await User.create({
+        email,
+        fullName: name,
+        profileImage: picture,
+        googleId: ticket.getUserId(),
+        password: jwt.sign({ date: Date.now() }, process.env.JWT_SECRET) // random secure password
+      });
+    } else {
+      // Update existing user's Google information
+      user.googleId = ticket.getUserId();
+      if (!user.profileImage) user.profileImage = picture;
+      await user.save();
+    }
+
+    // Generate JWT token
+    const authToken = jwt.sign(
+      { userId: user._id, email: user.email },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    // Return user and token
+    res.json({
+      token: authToken,
+      user: {
+        _id: user._id,
+        email: user.email,
+        fullName: user.fullName,
+        profileImage: user.profileImage,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt
+      }
+    });
+  } catch (error) {
+    console.error('Google login error:', error);
+    res.status(500).json({ message: 'שגיאה בהתחברות עם Google. אנא נסה שנית.' });
+  }
+});
+
+// User routes
+// Admin routes
 app.get('/admin/stats', auth, async (req, res) => {
   try {
     const user = await User.findById(req.userId);
@@ -1198,9 +1265,9 @@ app.get('/admin/stats', auth, async (req, res) => {
     for (let user of usersList) {
       const userMeetings = await Meeting.find({ creator: user._id });
       user.totalMeetings = userMeetings.reduce((acc, meeting) => acc + meeting.bookedSlots.length, 0);
-      user.upcomingMeetings = userMeetings.reduce((acc, meeting) => 
-        acc + meeting.bookedSlots.filter(slot => 
-          slot.date >= new Date().toISOString().split('T')[0] && 
+      user.upcomingMeetings = userMeetings.reduce((acc, meeting) =>
+        acc + meeting.bookedSlots.filter(slot =>
+          slot.date >= new Date().toISOString().split('T')[0] &&
           slot.status === 'pending'
         ).length, 0);
     }
@@ -1244,27 +1311,27 @@ app.get('/user', auth, async (req, res) => {
     if (!user) {
       return res.status(404).json({ message: 'משתמש לא נמצא' });
     }
-  
-  // Let toJSON method handle the profile image URL
-  res.json({ user });
+
+    // Let toJSON method handle the profile image URL
+    res.json({ user });
   } catch (error) {
     console.error('Error fetching user:', error);
     res.status(500).json({ message: 'שגיאה בטעינת פרטי המשתמש' });
   }
-  });
-  
-  app.put('/user', auth, async (req, res) => {
+});
+
+app.put('/user', auth, async (req, res) => {
   try {
     const { fullName, email, currentPassword, newPassword, profileImage } = req.body;
-  
+
     const user = await User.findById(req.userId);
     if (!user) {
       return res.status(404).json({ message: 'משתמש לא נמצא' });
     }
-  
+
     if (fullName) user.fullName = fullName;
     if (email) user.email = email;
-    
+
     // אם נשלח אובייקט ריק, מחק את תמונת הפרופיל
     if (Object.keys(req.body).length === 0) {
       user.profileImage = {
@@ -1272,7 +1339,7 @@ app.get('/user', auth, async (req, res) => {
         contentType: null
       };
     }
-  
+
     if (currentPassword && newPassword) {
       const isValidPassword = await user.comparePassword(currentPassword);
       if (!isValidPassword) {
@@ -1285,9 +1352,9 @@ app.get('/user', auth, async (req, res) => {
     if (profileImage === null && user.isModified('profileImage')) {
       await cleanupOldProfileImage(req.userId);
     }
-  
+
     await user.save();
-  
+
     res.json({
       user: user.toJSON()
     });
@@ -1295,14 +1362,14 @@ app.get('/user', auth, async (req, res) => {
     console.error('Error updating user:', error);
     res.status(500).json({ message: 'Error updating user' });
   }
-  });
-  
-  // Optimized profile image upload endpoint
+});
+
+// Optimized profile image upload endpoint
 // העלאת תמונת פרופיל
 app.post('/user/profile-image', auth, async (req, res) => {
   try {
     console.log('Starting profile image upload for user:', req.userId);
-    
+
     await new Promise((resolve, reject) => {
       upload(req, res, (err) => {
         if (err) {
@@ -1340,7 +1407,7 @@ app.post('/user/profile-image', auth, async (req, res) => {
         withoutEnlargement: true,
         fastShrinkOnLoad: true
       })
-      .webp({ 
+      .webp({
         quality: 95,
         effort: 6,
         force: true,
@@ -1353,11 +1420,11 @@ app.post('/user/profile-image', auth, async (req, res) => {
       data: processedImageBuffer,
       contentType: 'image/webp'
     };
-    
+
     await user.save();
     console.log('User profile image updated in database');
 
-    res.json({ 
+    res.json({
       user: {
         ...user.toJSON(),
         profileImage: `${baseUrl}/api/user/${user._id}/profile-image?t=${Date.now()}`
@@ -1366,9 +1433,9 @@ app.post('/user/profile-image', auth, async (req, res) => {
 
   } catch (error) {
     console.error('Error uploading profile image:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       message: 'Error uploading profile image',
-      error: error.message 
+      error: error.message
     });
   }
 });
@@ -1389,34 +1456,34 @@ app.get('/api/user/:userId/profile-image', async (req, res) => {
       'Access-Control-Allow-Headers': 'Content-Type',
       'Cross-Origin-Resource-Policy': 'cross-origin'
     });
-    
+
     res.send(user.profileImage.data);
   } catch (error) {
     console.error('Error serving profile image:', error);
     res.status(500).send();
   }
 });
-  
-  app.delete('/user', auth, async (req, res) => {
+
+app.delete('/user', auth, async (req, res) => {
   try {
     const user = await User.findById(req.userId);
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
-  
-  
+
+
     // Delete user's meetings
     await Meeting.deleteMany({ creator: req.userId });
-  
+
     // Delete user
     await user.deleteOne();
-  
+
     res.json({ message: 'User account deleted successfully' });
   } catch (error) {
     console.error('Error deleting user:', error);
     res.status(500).json({ message: 'Error deleting user' });
   }
-  });
+});
 // Connect to MongoDB with retry mechanism
 const connectWithRetry = async (retries = 5, delay = 5000) => {
   try {
@@ -1442,7 +1509,7 @@ const connectWithRetry = async (retries = 5, delay = 5000) => {
       process.exit(1);
     }
 
-    console.log(`Retrying connection in ${delay/1000} seconds... (${retries} retries left)`);
+    console.log(`Retrying connection in ${delay / 1000} seconds... (${retries} retries left)`);
     setTimeout(() => connectWithRetry(retries - 1, delay * 2), delay);
   }
 };
@@ -1469,14 +1536,14 @@ connectWithRetry().then(() => {
 app.put('/user/profile-image', auth, express.json(), async (req, res) => {
   try {
     const { imageUrl } = req.body;
-    
+
     console.log('Updating profile image URL:', {
       userId: req.userId,
       imageUrl
     });
 
     if (!imageUrl) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         message: 'Image URL is required'
       });
     }
@@ -1485,14 +1552,14 @@ app.put('/user/profile-image', auth, express.json(), async (req, res) => {
     try {
       new URL(imageUrl);
     } catch (error) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         message: 'Invalid image URL format'
       });
     }
 
     const user = await User.findById(req.userId);
     if (!user) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         message: 'User not found'
       });
     }
@@ -1508,9 +1575,9 @@ app.put('/user/profile-image', auth, express.json(), async (req, res) => {
 
   } catch (error) {
     console.error('Error updating profile image URL:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       message: 'Error updating profile image URL',
-      error: error.message 
+      error: error.message
     });
   }
 });
