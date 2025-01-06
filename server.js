@@ -1322,7 +1322,7 @@ app.get('/user', auth, async (req, res) => {
 
 app.put('/user', auth, async (req, res) => {
   try {
-    const { fullName, email, currentPassword, newPassword, profileImage } = req.body;
+    const { fullName, email, currentPassword, newPassword } = req.body;
 
     const user = await User.findById(req.userId);
     if (!user) {
@@ -1333,12 +1333,6 @@ app.put('/user', auth, async (req, res) => {
     if (email) user.email = email;
 
     // אם נשלח אובייקט ריק, מחק את תמונת הפרופיל
-    if (Object.keys(req.body).length === 0) {
-      user.profileImage = {
-        data: null,
-        contentType: null
-      };
-    }
 
     if (currentPassword && newPassword) {
       const isValidPassword = await user.comparePassword(currentPassword);
@@ -1346,11 +1340,6 @@ app.put('/user', auth, async (req, res) => {
         return res.status(400).json({ message: 'סיסמה נוכחית שגויה' });
       }
       user.password = newPassword;
-    }
-
-    // If profileImage is being set to null, clean up old image
-    if (profileImage === null && user.isModified('profileImage')) {
-      await cleanupOldProfileImage(req.userId);
     }
 
     await user.save();
