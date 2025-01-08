@@ -1124,7 +1124,7 @@ app.post('/auth/register', express.json(), async (req, res) => {
       });
 
       const emailResponse = await resend.emails.send({
-        from: 'onboarding@meetyil.com',
+        from: 'Meetyteam@meetyil.com',
         to: user.email,
         subject: 'קוד אימות - Meety',
         html: `
@@ -1589,7 +1589,7 @@ app.post('/auth/resend-otp', express.json(), async (req, res) => {
 
     // Send new OTP email
     await resend.emails.send({
-      from: 'onboarding@meetyil.com',
+      from: 'Meetyteam@meetyil.com',
       to: user.email,
       subject: 'קוד אימות חדש - Meety',
       html: `
