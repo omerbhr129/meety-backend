@@ -1181,7 +1181,7 @@ app.post('/auth/login', express.json(), async (req, res) => {
 
     // Check if email is verified for manual registrations
     if (!user.googleId && !user.isEmailVerified) {
-      return res.status(401).json({
+      return res.status(200).json({
         message: 'אנא אמת את כתובת האימייל שלך לפני ההתחברות',
         needsVerification: true,
         userId: user._id
