@@ -17,6 +17,8 @@ const Participant = require('./models/Participant');
 const auth = require('./middlewares/auth');
 const adminRoutes = require('./routes/admin');
 const { OAuth2Client } = require('google-auth-library');
+const { Resend } = require('resend');
+const resend = new Resend('re_7RjurPbh_CQBwvNh97hkkUXoF2gob8sjA');
 
 
 const app = express();
@@ -1103,27 +1105,62 @@ app.post('/auth/register', express.json(), async (req, res) => {
       fullName,
       role: 'user',
       status: 'active',
-      notificationRead: false
+      notificationRead: false,
+      isEmailVerified: false
     });
 
+    // Generate OTP
+    const otp = user.generateOTP();
     await user.save();
 
-    const token = jwt.sign(
-      { userId: user._id, email: user.email },
-      JWT_SECRET,
-      { expiresIn: '7d' }
-    );
+    console.log('OTP:', otp);
+
+    // Send OTP email
+    try {
+      console.log('Attempting to send OTP email:', {
+        to: user.email,
+        otp: otp,
+        timestamp: new Date().toISOString()
+      });
+
+      const emailResponse = await resend.emails.send({
+        from: 'onboarding@meetyil.com',
+        to: user.email,
+        subject: 'קוד אימות - Meety',
+        html: `
+          <div dir="rtl" style="font-family: Arial, sans-serif;">
+            <h2>ברוכים הבאים ל-Meety!</h2>
+            <p>קוד האימות שלך הוא:</p>
+            <h1 style="font-size: 32px; letter-spacing: 5px; text-align: center; padding: 20px; background-color: #f5f5f5; border-radius: 5px;">${otp}</h1>
+            <p>הקוד תקף ל-10 דקות בלבד.</p>
+            <p>אם לא ביקשת להירשם לשירות, אנא התעלם מהודעה זו.</p>
+          </div>
+        `
+      });
+
+      console.log('Email sent successfully:', {
+        response: emailResponse,
+        timestamp: new Date().toISOString()
+      });
+
+    } catch (emailError) {
+      console.error('Failed to send OTP email:', {
+        error: emailError.message,
+        stack: emailError.stack,
+        timestamp: new Date().toISOString(),
+        user: {
+          email: user.email,
+          id: user._id
+        }
+      });
+      
+      // Re-throw the error to be handled by the outer try-catch
+      throw new Error(`Failed to send verification email: ${emailError.message}`);
+    }
 
     res.status(201).json({
-      token,
-      user: {
-        _id: user._id,
-        email: user.email,
-        fullName: user.fullName,
-        profileImage: user.profileImage,
-        createdAt: user.createdAt,
-        updatedAt: user.updatedAt
-      }
+      message: 'נרשמת בהצלחה! קוד אימות נשלח לכתובת האימייל שלך.',
+      userId: user._id
     });
   } catch (error) {
     console.error('Registration error:', error);
@@ -1140,6 +1177,15 @@ app.post('/auth/login', express.json(), async (req, res) => {
     if (!user) {
       console.log('User not found:', email);
       return res.status(401).json({ message: 'משתמש לא קיים במערכת. אנא הירשם תחילה.' });
+    }
+
+    // Check if email is verified for manual registrations
+    if (!user.googleId && !user.isEmailVerified) {
+      return res.status(401).json({
+        message: 'אנא אמת את כתובת האימייל שלך לפני ההתחברות',
+        needsVerification: true,
+        userId: user._id
+      });
     }
 
     const isValidPassword = await user.comparePassword(password);
@@ -1175,6 +1221,7 @@ app.post('/auth/google', express.json(), async (req, res) => {
   try {
     const { token } = req.body;
     console.log('Google login attempt:', { token });
+    
     // Verify Google token
     const ticket = await client.verifyIdToken({
       idToken: token,
@@ -1193,11 +1240,14 @@ app.post('/auth/google', express.json(), async (req, res) => {
         fullName: name,
         profileImage: picture,
         googleId: ticket.getUserId(),
-        password: jwt.sign({ date: Date.now() }, process.env.JWT_SECRET) // random secure password
+        password: jwt.sign({ date: Date.now() }, process.env.JWT_SECRET), // random secure password
+        isEmailVerified: true, // Automatically verify Google users
+        status: 'active'
       });
     } else {
       // Update existing user's Google information
       user.googleId = ticket.getUserId();
+      user.isEmailVerified = true; // Ensure email is verified
       if (!user.profileImage) user.profileImage = picture;
       await user.save();
     }
@@ -1217,6 +1267,7 @@ app.post('/auth/google', express.json(), async (req, res) => {
         email: user.email,
         fullName: user.fullName,
         profileImage: user.profileImage,
+        isEmailVerified: user.isEmailVerified,
         createdAt: user.createdAt,
         updatedAt: user.updatedAt
       }
@@ -1473,6 +1524,91 @@ app.delete('/user', auth, async (req, res) => {
     res.status(500).json({ message: 'Error deleting user' });
   }
 });
+
+// Add OTP verification route
+app.post('/auth/verify-otp', express.json(), async (req, res) => {
+  try {
+    const { userId, otp } = req.body;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: 'משתמש לא נמצא' });
+    }
+
+    try {
+      user.verifyOTP(otp);
+    } catch (error) {
+      await user.save(); // Save increased attempts count
+      return res.status(400).json({ message: error.message });
+    }
+
+    // OTP is valid - verify user and cleanup OTP data
+    user.isEmailVerified = true;
+    user.otp = {
+      code: null,
+      expiresAt: null,
+      attempts: 0
+    };
+    await user.save();
+
+    // Generate JWT token
+    const token = jwt.sign(
+      { userId: user._id, email: user.email },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.json({
+      message: 'האימייל אומת בהצלחה!',
+      token,
+      user: user.toJSON()
+    });
+  } catch (error) {
+    console.error('OTP verification error:', error);
+    res.status(500).json({ message: 'שגיאה באימות הקוד. אנא נסה שנית.' });
+  }
+});
+
+// Add resend OTP route
+app.post('/auth/resend-otp', express.json(), async (req, res) => {
+  try {
+    const { userId } = req.body;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: 'משתמש לא נמצא' });
+    }
+
+    if (user.isEmailVerified) {
+      return res.status(400).json({ message: 'האימייל כבר אומת' });
+    }
+
+    // Generate new OTP
+    const otp = user.generateOTP();
+    await user.save();
+
+    // Send new OTP email
+    await resend.emails.send({
+      from: 'onboarding@meetyil.com',
+      to: user.email,
+      subject: 'קוד אימות חדש - Meety',
+      html: `
+        <div dir="rtl" style="font-family: Arial, sans-serif;">
+          <h2>קוד אימות חדש</h2>
+          <p>קוד האימות החדש שלך הוא:</p>
+          <h1 style="font-size: 32px; letter-spacing: 5px; text-align: center; padding: 20px; background-color: #f5f5f5; border-radius: 5px;">${otp}</h1>
+          <p>הקוד תקף ל-10 דקות בלבד.</p>
+        </div>
+      `
+    });
+
+    res.json({ message: 'קוד אימות חדש נשלח לכתובת האימייל שלך' });
+  } catch (error) {
+    console.error('Resend OTP error:', error);
+    res.status(500).json({ message: 'שגיאה בשליחת הקוד החדש. אנא נסה שנית.' });
+  }
+});
+
 // Connect to MongoDB with retry mechanism
 const connectWithRetry = async (retries = 5, delay = 5000) => {
   try {

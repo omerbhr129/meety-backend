@@ -92,6 +92,24 @@ const userSchema = new mongoose.Schema({
   updatedAt: {
     type: Date,
     default: Date.now
+  },
+  isEmailVerified: {
+    type: Boolean,
+    default: false
+  },
+  otp: {
+    code: {
+      type: String,
+      default: null
+    },
+    expiresAt: {
+      type: Date,
+      default: null
+    },
+    attempts: {
+      type: Number,
+      default: 0
+    }
   }
 }, {
   timestamps: true
@@ -181,6 +199,43 @@ userSchema.methods.comparePassword = async function (candidatePassword) {
   } catch (error) {
     throw error;
   }
+};
+
+// Add method to generate OTP
+userSchema.methods.generateOTP = function() {
+  // Generate 6-digit OTP
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  
+  this.otp = {
+    code: otp,
+    expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes expiry
+    attempts: 0
+  };
+  
+  return otp;
+};
+
+// Add method to verify OTP
+userSchema.methods.verifyOTP = function(code) {
+  if (!this.otp.code || !this.otp.expiresAt) {
+    throw new Error('לא נמצא קוד אימות פעיל');
+  }
+
+  if (this.otp.expiresAt < Date.now()) {
+    throw new Error('קוד האימות פג תוקף');
+  }
+
+  if (this.otp.attempts >= 3) {
+    throw new Error('חרגת ממספר הניסיונות המותר. אנא בקש קוד חדש');
+  }
+
+  this.otp.attempts += 1;
+
+  if (this.otp.code !== code) {
+    throw new Error('קוד אימות שגוי');
+  }
+
+  return true;
 };
 
 module.exports = mongoose.model('User', userSchema);
