@@ -362,7 +362,7 @@ app.get('/meetings/:idOrLink', async (req, res) => {
 });
 
 // Create participant
-app.post('/participants', auth, express.json(), async (req, res) => {
+app.post('/participants', express.json(), async (req, res) => {
   try {
     console.log('\nCreating participant with data:', req.body);
     const { name, email, phone } = req.body;

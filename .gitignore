@@ -5,11 +5,6 @@ yarn-debug.log
 yarn-error.log
 
 # Environment variables
-.env
-.env.local
-.env.development
-.env.test
-.env.production
 
 # Operating System
 .DS_Store
@@ -32,3 +27,4 @@ build/
 # Uploads
 # uploads/
 .vercel
+config.bat
