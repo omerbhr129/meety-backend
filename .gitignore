@@ -26,3 +26,4 @@ build/
 # Uploads
 # uploads/
 .vercel
+config.bat
